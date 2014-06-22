@@ -1,7 +1,10 @@
-#!/usr/local/bin/python
+#!/usr/bin/env python
 # coding: utf8
 
-import DNS, os, pprint, sys, time, re
+import os, pprint, sys, time, re
+
+sys.path.append('/net/srv/ftp/gb/tib/scripts')
+import DNS
 
 hexentity = re.compile(r'\\x([0-9a-f-A-F]{2})')
 urlhexentity = re.compile(r'%([0-9a-fA-F]{2})')
@@ -9,6 +12,33 @@ urlhexentity = re.compile(r'%([0-9a-fA-F]{2})')
 def decode_bytes(s):
     return hexentity.sub(lambda x: chr(int(eval('0x%s' % x.group(1)))),
         urlhexentity.sub(lambda x: chr(int(eval('0x%s' % x.group(1)))), s))
+
+class CassandraSystemLogSyntax:
+    def __init__(self):
+        self.pat = re.compile(
+            r'^(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}),(?P<milli>\d{3}) ' \
+            r'(?P<prio>[a-zA-Z ]{5}) ' \
+            r'(?P<thread>\[[^]]+\]) ' \
+            r'(?P<file>[^:]+):(?P<line>\d+) (?P<msg>.+)$')
+
+        self.filename_pat = re.compile(r'(/srv/cassandra/[a-zA-Z0-9_./-]+)')
+        self.number_pat = re.compile(r'(?<=[\s=/(\[])([0-9.,%]+)(?=[\s=/)\]])')
+
+        self.x = Xterm256color()
+
+    def __call__(self, line):
+        line = line.rstrip()
+        m = self.pat.match(line)
+        if not m: return line
+        gd = m.groupdict()
+        x = gd['x'] = self.x
+
+        gd['msg'] = self.filename_pat.sub(r'{x.c80}\1{x.c}'.format(**gd), gd['msg'])
+        gd['msg'] = self.number_pat.sub(r'{x.c184}\1{x.c}'.format(**gd), gd['msg'])
+
+        line = '{x.c27}{ts}{x.c},{x.c25}{milli} {x.c40}{prio} {x.c208}{thread} {x.c178}{file}{x.c}:{x.c172}{line}{x.c} {msg}'.format(**gd)
+
+        return line
 
 class AccessLogSyntax:
     def __init__(self):
@@ -72,7 +102,7 @@ class ErrorLogSyntax:
         self.php_error_pat = re.compile(
             r'''
             ((?P<server>\w+):\ )?
-            (?P<month>\w+)\ +(?P<date>\d+)\ (?P<time>[^ ]+)\ (\w+)\ ([^ ]+)\ 
+            (?P<month>\w+)\ +(?P<date>\d+)\ (?P<time>[^ ]+)\ ([\w-]+)\ ([^ ]+)\ 
             (?P<msg>.+?)$
             ''', re.X)
 
@@ -81,7 +111,7 @@ class ErrorLogSyntax:
             r'(.+)')
 
         self.php_err_pat = re.compile(
-            r'((mod_fcgid: stderr:( PHP)?)|(FastCGI: server "/usr/local/sbin/php-fpm" stderr:( PHP)?)|PHP) '
+            r'((mod_fcgid: stderr:( PHP)?)|(FastCGI: server "/usr/local/sbin/php-fpm" stderr:( PHP)?( message:)?( PHP)?)|PHP) '
             r'(?P<msg>.+)')
 
         self.php_func_link_pat = re.compile(
@@ -105,7 +135,7 @@ class ErrorLogSyntax:
         self.last_server = ''
         self.in_php_error = 0
 
-        self.dns_format = '{0:26s} {x.c208}{client:15s} {x.c178}{1}{x.c}\n'
+        self.dns_format = '{0:26s} ↓{x.c208}{client:15s} {x.c178}{1}{x.c}\n'
 
     def __call__(self, line):
         for pat in (self.pat, self.php_error_pat):
@@ -127,7 +157,7 @@ class ErrorLogSyntax:
             except DNS.DNSError, e:
                 gd['client-dn'] = self.dns_format.format('', '(%s)' % str(e), **gd)
             except:
-                gd['client'] = ''
+                #gd['client'] = ''
                 gd['client-dn'] = self.dns_format.format('', '-', **gd)
 
         # File does not exist 加色, 解檔名
@@ -146,7 +176,7 @@ class ErrorLogSyntax:
             if not gd.get('referer'): gd['referer'] = '<none>'
 
             gd['referer'] = decode_bytes(gd['referer'])
-            gd['referer'] = '{0:26s} {x.c241}{referer}{x.c}\n'.format('', **gd)
+            gd['referer'] = '{0:26s} ↓{x.c241}{referer}{x.c}\n'.format('', **gd)
         else:
             gd['referer'] = ''
 
@@ -213,8 +243,13 @@ if __name__ == '__main__':
     #    ('_wahaha.log' in sys.argv[1]) or
     #    ('_www.log' in sys.argv[1])):
     # access log
-    if len(sys.argv) > 1 and sys.argv[1] == 'access':
-        syntax = AccessLogSyntax()
+    if len(sys.argv) > 1:
+        if sys.argv[1] == 'access':
+            syntax = AccessLogSyntax()
+        elif sys.argv[1] == 'cassandra-system':
+            syntax = CassandraSystemLogSyntax()
+        elif sys.argv[1] == 'error':
+            syntax = ErrorLogSyntax()
     else:
         syntax = ErrorLogSyntax()
 
@@ -222,15 +257,19 @@ if __name__ == '__main__':
         print "Syntax not supported! Check source!"
         sys.exit(-1)
 
-    while 1:
-        #where = f.tell()
-        line = sys.stdin.readline()
-        #if not line:
-        #    time.sleep(0.2)
-        #    f.seek(where)
-        #else:
-        #    # highlight the line!
-        c = syntax(line)
-        if c: print c
+    try:
+        while 1:
+            #where = f.tell()
+            line = sys.stdin.readline()
+            #if not line:
+            #    time.sleep(0.2)
+            #    f.seek(where)
+            #else:
+            #    # highlight the line!
+            c = syntax(line)
+            if c: print c
+
+    except KeyboardInterrupt:
+        pass
 
 # vim: ts=4 sts=4 sw=4 et
