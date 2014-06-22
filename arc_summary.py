@@ -1,3 +1,4 @@
+#!/usr/bin/env python2
 # ported from http://cuddletech.com/arc_summary.html
 
 import pprint
@@ -34,7 +35,7 @@ print '    SPL slab allocated:      {0:9,.0f} MB'.format(spl_size / 1024.0 / 102
 print '    SPL slab used:           {0:9,.0f} MB'.format(spl_alloc / 1024.0 / 1024.0)
 print
 
-mfu_size = target_size - mru_size
+mfu_size = arc_size - mru_size
 mru_perc = 100*(mru_size / float(target_size))
 mfu_perc = 100*(mfu_size / float(target_size))
 
